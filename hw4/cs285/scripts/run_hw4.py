@@ -22,7 +22,7 @@ import tqdm
 from cs285.infrastructure import utils
 from cs285.infrastructure.logger import Logger
 
-from scripting_utils import make_logger, make_config
+from cs285.scripts.scripting_utils import make_logger, make_config
 
 import argparse
 
@@ -38,13 +38,23 @@ def collect_mbpo_rollout(
     ob: np.ndarray,
     rollout_len: int = 1,
 ):
+    assert ob.ndim == 1, ob.ndim
+
     obs, acs, rewards, next_obs, dones = [], [], [], [], []
     for _ in range(rollout_len):
         # TODO(student): collect a rollout using the learned dynamics models
         # HINT: get actions from `sac_agent` and `next_ob` predictions from `mb_agent`.
         # Average the ensemble predictions directly to get the next observation.
         # Get the reward using `env.get_reward`.
-
+        ac = sac_agent.get_action(ob)
+        next_ob = np.stack(
+            [
+                mb_agent.get_dynamics_predictions(i, ob[None], ac[None]).squeeze(0)
+                for i in range(mb_agent.ensemble_size)
+            ],
+            axis=0,
+        ).mean(axis=0)
+        rew, _ = env.get_reward(next_ob, ac)
         obs.append(ob)
         acs.append(ac)
         rewards.append(rew)
@@ -52,7 +62,6 @@ def collect_mbpo_rollout(
         dones.append(False)
 
         ob = next_ob
-
     return {
         "observation": np.array(obs),
         "action": np.array(acs),
@@ -78,9 +87,9 @@ def run_training_loop(
     ep_len = config["ep_len"] or env.spec.max_episode_steps
 
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
-    assert (
-        not discrete
-    ), "Our MPC implementation only supports continuous action spaces."
+    assert not discrete, (
+        "Our MPC implementation only supports continuous action spaces."
+    )
 
     # simulation timestep, will be used for video saving
     if "model" in dir(env):
@@ -119,10 +128,20 @@ def run_training_loop(
         if itr == 0:
             # TODO(student): collect at least config["initial_batch_size"] transitions with a random policy
             # HINT: Use `utils.RandomPolicy` and `utils.sample_trajectories`
-            trajs, envsteps_this_batch = ...
+            trajs, envsteps_this_batch = utils.sample_trajectories(
+                env=env,
+                policy=utils.RandomPolicy(env),
+                min_timesteps_per_batch=config["initial_batch_size"],
+                max_length=ep_len,
+            )
         else:
             # TODO(student): collect at least config["batch_size"] transitions with our `actor_agent`
-            trajs, envsteps_this_batch = ...
+            trajs, envsteps_this_batch = utils.sample_trajectories(
+                env=env,
+                policy=actor_agent,
+                min_timesteps_per_batch=config["batch_size"],
+                max_length=ep_len,
+            )
 
         total_envsteps += envsteps_this_batch
         logger.log_scalar(total_envsteps, "total_envsteps", itr)
@@ -165,6 +184,16 @@ def run_training_loop(
             # TODO(student): train the dynamics models
             # HINT: train each dynamics model in the ensemble with a *different* batch of transitions!
             # Use `replay_buffer.sample` with config["train_batch_size"].
+            for i in range(mb_agent.ensemble_size):
+                batch = replay_buffer.sample(config["train_batch_size"])
+                step_losses += [
+                    mb_agent.update(
+                        i=i,
+                        obs=batch["observations"],
+                        acs=batch["actions"],
+                        next_obs=batch["next_observations"],
+                    )
+                ]
             all_losses.append(np.mean(step_losses))
 
         # on iteration 0, plot the full learning curve
@@ -205,12 +234,14 @@ def run_training_loop(
                     )
                 # train SAC
                 batch = sac_replay_buffer.sample(sac_config["batch_size"])
+                batch = ptu.from_numpy(batch)
+
                 sac_agent.update(
                     batch["observations"],
                     batch["actions"],
                     batch["rewards"],
                     batch["next_observations"],
-                    batch["dones"],
+                    batch["dones"] > 0,
                     i,
                 )
 
