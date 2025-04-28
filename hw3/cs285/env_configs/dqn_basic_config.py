@@ -14,6 +14,7 @@ from cs285.env_configs.schedule import (
 )
 import cs285.infrastructure.pytorch_util as ptu
 
+
 def basic_dqn_config(
     env_name: str,
     exp_name: Optional[str] = None,
@@ -27,7 +28,7 @@ def basic_dqn_config(
     use_double_q: bool = False,
     learning_starts: int = 20000,
     batch_size: int = 128,
-    **kwargs
+    **kwargs,
 ):
     def make_critic(observation_shape: Tuple[int, ...], num_actions: int) -> nn.Module:
         return ptu.build_mlp(
@@ -54,7 +55,9 @@ def basic_dqn_config(
     )
 
     def make_env(render: bool = False):
-        return RecordEpisodeStatistics(gym.make(env_name, render_mode="rgb_array" if render else None))
+        return RecordEpisodeStatistics(
+            gym.make(env_name, render_mode="rgb_array" if render else None)
+        )
 
     log_string = "{}_{}_s{}_l{}_d{}".format(
         exp_name or "dqn",
