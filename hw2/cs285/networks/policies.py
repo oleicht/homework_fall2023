@@ -59,9 +59,10 @@ class MLPPolicy(nn.Module):
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         """Takes a single observation (as a numpy array) and returns a single action (as a numpy array)."""
         # TODO: implement get_action
-        action = None
+        obs = ptu.from_numpy(obs)
+        action = self.forward(obs).sample()
 
-        return action
+        return ptu.to_numpy(action)
 
     def forward(self, obs: torch.FloatTensor):
         """
@@ -71,11 +72,14 @@ class MLPPolicy(nn.Module):
         """
         if self.discrete:
             # TODO: define the forward pass for a policy with a discrete action space.
-            pass
+            actions = distributions.Categorical(logits=self.logits_net(obs))
         else:
             # TODO: define the forward pass for a policy with a continuous action space.
-            pass
-        return None
+            actions = distributions.MultivariateNormal(
+                loc=self.mean_net(obs),
+                covariance_matrix=torch.diag(self.logstd.exp().pow(2)),
+            )
+        return actions
 
     def update(self, obs: np.ndarray, actions: np.ndarray, *args, **kwargs) -> dict:
         """Performs one iteration of gradient descent on the provided batch of data."""
@@ -97,7 +101,17 @@ class MLPPolicyPG(MLPPolicy):
         advantages = ptu.from_numpy(advantages)
 
         # TODO: implement the policy gradient actor update.
-        loss = None
+        self.optimizer.zero_grad()
+        # import pdb
+
+        # pdb.set_trace()
+        log_probs = self.forward(obs).log_prob(actions)
+        assert log_probs.shape == advantages.shape, (
+            f"{log_probs.shape} == {advantages.shape}"
+        )
+        loss = -(log_probs * advantages).mean()
+        loss.backward()
+        self.optimizer.step()
 
         return {
             "Actor Loss": ptu.to_numpy(loss),
