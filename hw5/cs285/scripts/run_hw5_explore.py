@@ -1,5 +1,6 @@
 import time
 import argparse
+from pathlib import Path
 import pickle
 
 from cs285.agents import agents as agent_types
@@ -18,13 +19,14 @@ from cs285.infrastructure import utils
 from cs285.infrastructure.logger import Logger
 from cs285.infrastructure.replay_buffer import ReplayBuffer
 
-from scripting_utils import make_logger, make_config
+from cs285.scripts.scripting_utils import make_logger, make_config
 
 MAX_NVIDEO = 2
 
 
 def visualize(env: Pointmass, agent, observations: torch.Tensor):
     import matplotlib.pyplot as plt
+
     fig = plt.figure(figsize=(10, 10))
 
     num_subplots = agent.num_aux_plots() + 1 if hasattr(agent, "num_aux_plots") else 1
@@ -32,11 +34,7 @@ def visualize(env: Pointmass, agent, observations: torch.Tensor):
     axes = fig.subplots(1, num_subplots)
     ax = axes[0] if num_subplots > 1 else axes
     env.plot_walls(ax)
-    ax.scatter(
-        observations[:, 0],
-        observations[:, 1],
-        alpha=0.1
-    )
+    ax.scatter(observations[:, 0], observations[:, 1], alpha=0.1)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
 
@@ -58,6 +56,9 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
     # make the gym environment
     env = config["make_env"]()
+    eval_env = config["make_env"]()
+    render_env = config["make_env"]()
+
     exploration_schedule = config.get("exploration_schedule", None)
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
@@ -101,7 +102,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
             done=done and not truncated,
             next_observation=next_observation,
         )
-        recent_observations.append(observation)
+        recent_observations.append(next_observation)
 
         # Handle episode termination
         if done:
@@ -117,7 +118,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
         # Convert to PyTorch tensors
         batch = ptu.from_numpy(batch)
-
+        assert not config.get("use_reward", False)
         update_info = agent.update(
             batch["observations"],
             batch["actions"],
@@ -139,7 +140,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         if step % args.eval_interval == 0:
             # Evaluate
             trajectories = utils.sample_n_trajectories(
-                env,
+                eval_env,
                 agent,
                 args.num_eval_trajectories,
                 ep_len,
@@ -159,27 +160,31 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                 logger.log_scalar(np.min(ep_lens), "eval/ep_len_min", step)
 
         if step % args.visualize_interval == 0:
-            env_pointmass: Pointmass = env.unwrapped
+            env_pointmass: Pointmass = render_env.unwrapped
             observations = np.stack(recent_observations)
             recent_observations = []
             logger.log_figure(
                 visualize(env_pointmass, agent, observations),
                 "exploration_trajectories",
                 step,
-                "eval"
+                "eval",
             )
 
-
     # Save the final dataset
-    dataset_file = os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl")
+    root = Path("/workspace/homework_fall2023/hw5")
+
+    dataset_file = root / args.dataset_dir / f"{config['dataset_name']}.pkl"
     with open(dataset_file, "wb") as f:
         pickle.dump(replay_buffer, f)
         print("Saved dataset to", dataset_file)
-    
+
     # Render final heatmap
-    fig = visualize(env_pointmass, agent, replay_buffer.observations[:config["total_steps"]])
+    fig = visualize(
+        env_pointmass, agent, replay_buffer.observations[: config["total_steps"]]
+    )
     fig.suptitle("State coverage")
-    filename = os.path.join("exploration_visualization", f"{config['log_name']}.png")
+    filename = root / "exploration_visualization" / f"{config['log_name']}.png"
+    filename.parent.mkdir(exist_ok=True)
     fig.savefig(filename)
     print("Saved final heatmap to", filename)
 
@@ -192,6 +197,7 @@ Generating the dataset for the {env} environment using algorithm {alg}.
 The results will be stored in {dataset_dir}.
 ======================================================================
 """
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -218,7 +224,11 @@ def main():
     logger = make_logger(logdir_prefix, config)
 
     os.makedirs(args.dataset_dir, exist_ok=True)
-    print(banner.format(env=config["env_name"], alg=config["agent"], dataset_dir=args.dataset_dir))
+    print(
+        banner.format(
+            env=config["env_name"], alg=config["agent"], dataset_dir=args.dataset_dir
+        )
+    )
 
     run_training_loop(config, logger, args)
 

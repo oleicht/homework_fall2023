@@ -18,8 +18,8 @@ from cs285.infrastructure import utils
 from cs285.infrastructure.logger import Logger
 from cs285.infrastructure.replay_buffer import ReplayBuffer
 
-from scripting_utils import make_logger, make_config
-from run_hw5_explore import visualize
+from cs285.scripts.scripting_utils import make_logger, make_config
+from cs285.scripts.run_hw5_explore import visualize
 
 MAX_NVIDEO = 2
 
@@ -32,6 +32,8 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
     # make the gym environment
     env = config["make_env"]()
+    eval_env = config["make_env"]()
+    render_env = config["make_env"]()
     exploration_schedule = config.get("exploration_schedule", None)
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 
@@ -51,15 +53,51 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
     # Replay buffer
     replay_buffer = ReplayBuffer(capacity=config["total_steps"])
 
+    with open(
+        os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl"), "rb"
+    ) as f:
+        replay_buffer_disk: ReplayBuffer = pickle.load(f)
+
+    for o, a, r, no, d in zip(
+        replay_buffer_disk.observations,
+        replay_buffer_disk.actions,
+        replay_buffer_disk.rewards,
+        replay_buffer_disk.next_observations,
+        replay_buffer_disk.dones,
+    ):
+        replay_buffer.insert(o, a, r, no, d)
+
     observation = env.reset()
 
     recent_observations = []
 
     num_offline_steps = config["offline_steps"]
     num_online_steps = config["total_steps"] - num_offline_steps
+    epsilon = None
 
     for step in tqdm.trange(config["total_steps"], dynamic_ncols=True):
         # TODO(student): Borrow code from another online training script here. Only run the online training loop after `num_offline_steps` steps.
+        if step > num_offline_steps:
+            epsilon = 0.0  # 02
+            action = agent.get_action(observation, epsilon=epsilon)
+            # Step the environment and add the data to the replay buffer
+            next_observation, reward, done, info = env.step(action)
+            next_observation = np.asarray(next_observation)
+            replay_buffer.insert(
+                observation=observation,
+                action=action,
+                reward=reward,
+                next_observation=next_observation,
+                done=done and not info.get("TimeLimit.truncated", False),
+            )
+            recent_observations.append(observation)
+            if done:
+                observation = env.reset()
+
+                logger.log_scalar(info["episode"]["r"], "train_return", step)
+                logger.log_scalar(info["episode"]["l"], "train_ep_len", step)
+            else:
+                observation = next_observation
 
         # Main training loop
         batch = replay_buffer.sample(config["batch_size"])
@@ -70,7 +108,8 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         update_info = agent.update(
             batch["observations"],
             batch["actions"],
-            batch["rewards"] * (1 if config.get("use_reward", False) else 0),
+            100
+            * (batch["rewards"] + 1),  # transform rewards to improve training dynamics
             batch["next_observations"],
             batch["dones"],
             step,
@@ -88,7 +127,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         if step % args.eval_interval == 0:
             # Evaluate
             trajectories = utils.sample_n_trajectories(
-                env,
+                eval_env,
                 agent,
                 args.num_eval_trajectories,
                 ep_len,
@@ -107,8 +146,8 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                 logger.log_scalar(np.max(ep_lens), "eval/ep_len_max", step)
                 logger.log_scalar(np.min(ep_lens), "eval/ep_len_min", step)
 
-        if step % args.visualize_interval == 0:
-            env_pointmass: Pointmass = env.unwrapped
+        if step % args.visualize_interval == 0 and len(recent_observations) > 0:
+            env_pointmass: Pointmass = render_env.unwrapped
             observations = np.stack(recent_observations)
             recent_observations = []
             logger.log_figure(
@@ -119,17 +158,20 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
             )
 
     # Save the final dataset
-    dataset_file = os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl")
-    with open(dataset_file, "wb") as f:
-        pickle.dump(replay_buffer, f)
-        print("Saved dataset to", dataset_file)
+    # dataset_file = os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl")
+    # with open(dataset_file, "wb") as f:
+    #     pickle.dump(replay_buffer, f)
+    #     print("Saved dataset to", dataset_file)
 
     # Render final heatmap
     fig = visualize(
         env_pointmass, agent, replay_buffer.observations[: config["total_steps"]]
     )
     fig.suptitle("State coverage")
-    filename = os.path.join("exploration", f"{config['log_name']}.png")
+    from pathlib import Path
+
+    root = Path("/workspace/homework_fall2023/hw5")
+    filename = root / f"exploration/{config['log_name']}.png"
     fig.savefig(filename)
     print("Saved final heatmap to", filename)
 

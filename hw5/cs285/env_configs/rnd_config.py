@@ -1,5 +1,6 @@
 import torch
 from cs285.env_configs.dqn_config import basic_dqn_config
+from cs285.env_configs.schedule import PiecewiseSchedule
 from cs285.infrastructure import pytorch_util as ptu
 
 
@@ -32,8 +33,8 @@ def rnd_config(
         n_layers=rnd_network_num_layers,
         size=rnd_network_hidden_size,
     )
-    config["agent_kwargs"][
-        "make_rnd_network_optimizer"
-    ] = lambda params: torch.optim.Adam(params, lr=rnd_network_learning_rate)
+    config["agent_kwargs"]["make_rnd_network_optimizer"] = (
+        lambda params: torch.optim.Adam(params, lr=rnd_network_learning_rate)
+    )
 
     return config

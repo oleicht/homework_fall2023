@@ -1,6 +1,6 @@
 base_config: "cql"
 env_name: "PointmassHard-v0"
-exp_name: "pointmass_hard_cql"
+exp_name: "ft_pointmass_hard_cql"
 use_double_q: true
 total_steps: 200000
 offline_steps: 100000

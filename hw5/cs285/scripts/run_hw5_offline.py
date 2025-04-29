@@ -21,7 +21,7 @@ from cs285.infrastructure import utils
 from cs285.infrastructure.logger import Logger
 from cs285.infrastructure.replay_buffer import MemoryEfficientReplayBuffer, ReplayBuffer
 
-from scripting_utils import make_logger, make_config
+from cs285.scripts.scripting_utils import make_logger, make_config
 
 MAX_NVIDEO = 2
 
@@ -46,8 +46,9 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
     )
 
     ep_len = env.spec.max_episode_steps or env.max_episode_steps
-
-    with open(os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl"), "rb") as f:
+    with open(
+        os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl"), "rb"
+    ) as f:
         dataset = pickle.load(f)
 
     for step in tqdm.trange(config["training_steps"], dynamic_ncols=True):
@@ -55,7 +56,8 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         batch = dataset.sample(config["batch_size"])
 
         batch = {
-            k: ptu.from_numpy(v) if isinstance(v, np.ndarray) else v for k, v in batch.items()
+            k: ptu.from_numpy(v) if isinstance(v, np.ndarray) else v
+            for k, v in batch.items()
         }
 
         metrics = agent.update(
@@ -70,7 +72,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         if step % args.log_interval == 0:
             for k, v in metrics.items():
                 logger.log_scalar(v, k, step)
-        
+
         if step % args.eval_interval == 0:
             # Evaluate
             trajectories = utils.sample_n_trajectories(
@@ -95,10 +97,13 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
             env_pointmass: Pointmass = env.unwrapped
             logger.log_figures(
-                [env_pointmass.plot_trajectory(trajectory["next_observation"]) for trajectory in trajectories],
+                [
+                    env_pointmass.plot_trajectory(trajectory["next_observation"])
+                    for trajectory in trajectories
+                ],
                 "trajectories",
                 step,
-                "eval"
+                "eval",
             )
 
 
