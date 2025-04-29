@@ -3,4 +3,4 @@
 
 
 ## Finetuning performance
-The pdf says that a score of at least -20 is attainable for PointmassHard-v0. At the moment I don't get close: the best trajectories across different algos are around -30. I tried the reward transformation trick: r = (r+1) *100, this helps speeding-up training a lot but doens't improve the best trajectories. Beside a bug in the code, my main suspicion is that I use the wrong eval protocal. Maybe I should start eval trajectories at random points and not the same point (that is pretty far away from the goal).
+The PDF says that a score of at least -20 is attainable for PointmassHard-v0. At the moment I don't get close: the best trajectories across different algorithms are around -30. I tried the reward transformation trick: r = (r+1)*100, this helps speed up training a lot but doesn't improve the best trajectories. Besides a bug in the code, my main suspicion is that I use the wrong evaluation protocol. Maybe I should start evaluation trajectories at random points and not the same point (that is pretty far away from the goal).
